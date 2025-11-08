@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zero-Backend Scrum Facilitator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    keyframes: {
+                        flip: {
+                            '0%': { transform: 'rotateY(0deg)' },
+                            '100%': { transform: 'rotateY(180deg)' },
+                        },
+                        reveal: {
+                           '0%': { opacity: '0', transform: 'translateY(20px) scale(0.95)' },
+                           '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+                        },
+                        'slide-in': {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        'voting-glow': {
+                            '0%': { backgroundPosition: '0% 50%' },
+                            '50%': { backgroundPosition: '100% 50%' },
+                            '100%': { backgroundPosition: '0% 50%' },
+                        }
+                    },
+                    animation: {
+                        'card-flip': 'flip 0.6s ease-in-out forwards',
+                        'reveal': 'reveal 0.5s ease-out forwards',
+                        'slide-in': 'slide-in 0.3s ease-out forwards',
+                        'voting-glow': 'voting-glow 15s ease infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .perspective {
+            perspective: 1000px;
+        }
+        .flipper-container {
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+            position: relative;
+        }
+        .flipper-container.flipped {
+            transform: rotateY(180deg);
+        }
+        .flipper-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .flipper-back {
+            transform: rotateY(180deg);
+        }
+        .voting-active-bg {
+          background: linear-gradient(-45deg, #edf2f7, #e2e8f0, #ccdbfd, #e2e8f0);
+          background-size: 400% 400%;
+          animation: voting-glow 15s ease infinite;
+        }
+        .dark .voting-active-bg {
+          background: linear-gradient(-45deg, #1e293b, #334155, #1e3a8a, #334155);
+          background-size: 400% 400%;
+          animation: voting-glow 15s ease infinite;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0"
+  }
+}
+</script>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300">
+    <div id="root"></div>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>

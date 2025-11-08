@@ -1,0 +1,7 @@
+{
+  "name": "Zero-Backend Scrum Facilitator",
+  "description": "A zero-friction, browser-based collaboration tool for agile ceremonies like planning poker and retrospectives. No accounts, no servers, no costs—just instant teamwork.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
