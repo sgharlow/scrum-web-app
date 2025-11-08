@@ -1,9 +1,10 @@
+
 import React, { useState, useMemo, useEffect, useRef, useContext, useReducer, useCallback } from 'react';
 import type { Story, VoteValue, RoomMode, Participant, AppState, Action } from './types';
 import ParticipantList from './components/ParticipantList';
 import PlanningView from './components/StoryLane';
 import RetroMode from './components/RetroMode';
-import { PlusIcon, TrashIcon, HeartIcon, PlayIcon, PauseIcon, ResetIcon, SunIcon, MoonIcon, ClipboardIcon, LinkIcon, UnlinkIcon, CrownIcon, XMarkIcon } from './components/Icons';
+import { PlusIcon, TrashIcon, HeartIcon, PlayIcon, PauseIcon, ResetIcon, SunIcon, MoonIcon, ClipboardIcon, LinkIcon, UnlinkIcon, CrownIcon, XMarkIcon, RefreshIcon } from './components/Icons';
 import { AVATAR_OPTIONS, ICEBREAKER_QUESTIONS } from './constants';
 import { appReducer, initialState } from './state';
 import { useCollaboration } from './hooks/useCollaboration';
@@ -14,6 +15,7 @@ const CollaborationContext = React.createContext<{
     state: AppState;
     dispatch: React.Dispatch<Action>;
     currentUser: Participant;
+    refreshData: () => Promise<void>;
 } | null>(null);
 
 export const useCollaborationContext = () => {
@@ -52,7 +54,10 @@ const ThemeToggle: React.FC = () => {
 };
 
 // --- LOBBY COMPONENT ---
-const Lobby: React.FC<{ onJoinRoom: (name: string, code: string, avatar: string, isCreating: boolean) => void }> = ({ onJoinRoom }) => {
+const Lobby: React.FC<{ 
+    onJoinRoom: (name: string, code: string, avatar: string) => Promise<void>,
+    isJoining: boolean 
+}> = ({ onJoinRoom, isJoining }) => {
   const [name, setName] = useState(generateRandomName);
   const [code, setCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATAR_OPTIONS[0]);
@@ -64,9 +69,12 @@ const Lobby: React.FC<{ onJoinRoom: (name: string, code: string, avatar: string,
     }
   }, []);
 
-  const generateRoomCode = () => `room-${Math.random().toString(36).substr(2, 6)}`;
-  const handleJoin = (e: React.FormEvent) => { e.preventDefault(); if (name.trim() && code.trim()) onJoinRoom(name.trim(), code.trim(), selectedAvatar, false); };
-  const handleCreate = () => { if (name.trim()) onJoinRoom(name.trim(), generateRoomCode(), selectedAvatar, true); };
+  const handleSubmit = (e: React.FormEvent) => { 
+      e.preventDefault(); 
+      if (name.trim() && code.trim()) {
+          onJoinRoom(name.trim(), code.trim(), selectedAvatar);
+      }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
@@ -79,15 +87,13 @@ const Lobby: React.FC<{ onJoinRoom: (name: string, code: string, avatar: string,
           <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Choose your Avatar</label>
           <div className="flex justify-center gap-3 flex-wrap">{AVATAR_OPTIONS.map(avatar => (<button key={avatar} onClick={() => setSelectedAvatar(avatar)} className={`p-1 rounded-full transition-all ${selectedAvatar === avatar ? 'ring-2 ring-offset-2 ring-sky-500 dark:ring-offset-slate-800' : ''}`}><img src={avatar} alt="avatar" className="w-12 h-12 rounded-full" /></button>))}</div>
         </div>
-        <div className="space-y-4">
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" />
-          <form onSubmit={handleJoin} className="flex gap-2">
-            <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter room code" className="flex-grow bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" />
-            <button type="submit" disabled={!name.trim() || !code.trim()} className="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 disabled:bg-slate-400 transition-colors">Join</button>
-          </form>
-        </div>
-        <div className="flex items-center gap-4"><hr className="flex-grow border-slate-200 dark:border-slate-700" /><span className="text-slate-400">OR</span><hr className="flex-grow border-slate-200 dark:border-slate-700" /></div>
-        <button onClick={handleCreate} disabled={!name.trim()} className="w-full px-6 py-4 bg-sky-600 text-white font-bold text-lg rounded-md hover:bg-sky-700 disabled:bg-slate-400 transition-colors">Create New Room</button>
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
+            <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter Room Code" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
+            <button type="submit" disabled={!name.trim() || !code.trim() || isJoining} className="w-full px-6 py-4 bg-sky-600 text-white font-bold text-lg rounded-md hover:bg-sky-700 disabled:bg-slate-400 transition-colors">
+                {isJoining ? 'Connecting...' : 'Create / Join Room'}
+            </button>
+        </form>
       </div>
     </div>
   );
@@ -112,7 +118,12 @@ const Timer: React.FC = () => {
 }
 
 // --- PROVIDER & MAIN ROOM COMPONENT ---
-const CollaborationProvider: React.FC<{ children: React.ReactNode, roomCode: string, currentUser: Participant, facilitatorId: string }> = ({ children, roomCode, currentUser, facilitatorId }) => {
+const CollaborationProvider: React.FC<{ 
+    children: React.ReactNode; 
+    roomCode: string; 
+    currentUser: Participant; 
+    facilitatorId: string;
+}> = ({ children, roomCode, currentUser, facilitatorId }) => {
     const [state, localDispatch] = useReducer(appReducer, {
         ...initialState,
         roomCode,
@@ -120,6 +131,11 @@ const CollaborationProvider: React.FC<{ children: React.ReactNode, roomCode: str
         participants: [currentUser],
         icebreaker: ICEBREAKER_QUESTIONS[Math.floor(Math.random() * ICEBREAKER_QUESTIONS.length)],
     });
+
+    const stateRef = useRef(state);
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
 
     const isFacilitator = currentUser.id === facilitatorId;
     const broadcastRef = useRef<(payload: any) => void>(() => {});
@@ -143,17 +159,30 @@ const CollaborationProvider: React.FC<{ children: React.ReactNode, roomCode: str
 
     const onMessage = useCallback((senderId: string, message: any) => {
         if (isFacilitator) {
-            // Facilitator processes messages (introductions and actions) from participants
-            if (message.type === 'INTRODUCE_SELF') {
-                localDispatch({ type: 'ADD_PARTICIPANT', payload: message.payload });
+            if (message.type === 'INTRODUCE_AND_REQUEST_STATE') {
+                console.log(`New participant ${senderId} joined, sending them the current state.`);
+                const participant = message.payload as Participant;
+                
+                if (stateRef.current.participants.some(p => p.id === participant.id)) {
+                     sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
+                     return;
+                }
+
+                const newParticipants = [...stateRef.current.participants, participant];
+                const nextState: AppState = { ...stateRef.current, participants: newParticipants };
+                
+                localDispatch({ type: 'SET_STATE', payload: nextState });
+                sendRef.current(senderId, { type: 'SET_STATE', payload: nextState });
+
+            } else if (message.type === 'REQUEST_STATE') {
+                console.log(`Received state request from ${senderId}. Sending current state back.`);
+                sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
             } else {
                 localDispatch(message as Action);
             }
         } else {
-            // Participants only accept SET_STATE messages from the facilitator
             if (message.type === 'SET_STATE') {
                 const remoteState = message.payload as AppState;
-                // Preserve the current user's object to prevent UI glitches
                 remoteState.participants = [
                     ...remoteState.participants.filter(p => p.id !== currentUser.id),
                     currentUser
@@ -165,9 +194,8 @@ const CollaborationProvider: React.FC<{ children: React.ReactNode, roomCode: str
     
     const onOpen = useCallback((peerId: string) => {
         console.log(`Connection opened with ${peerId}.`);
-        // When a participant connects to the facilitator, they introduce themselves.
         if (!isFacilitator && peerId === facilitatorId) {
-            sendRef.current(facilitatorId, { type: 'INTRODUCE_SELF', payload: currentUser });
+            sendRef.current(facilitatorId, { type: 'INTRODUCE_AND_REQUEST_STATE', payload: currentUser });
         }
     }, [isFacilitator, facilitatorId, currentUser]);
 
@@ -183,31 +211,67 @@ const CollaborationProvider: React.FC<{ children: React.ReactNode, roomCode: str
     broadcastRef.current = broadcast;
     sendRef.current = send;
 
-    // Auto-connect for participants to the facilitator, only after their own peer is ready.
     useEffect(() => {
         if (!isFacilitator && isReady) {
-            console.log(`Participant is ready, connecting to facilitator: ${facilitatorId}`);
-            connect(facilitatorId);
+            connect(facilitatorId).catch(error => {
+                console.error("Connection failed unexpectedly after pre-check. The facilitator may have left.", error);
+                alert("Connection failed. The facilitator may have left. Please refresh the page to rejoin.");
+            });
         }
-    }, [isFacilitator, facilitatorId, connect, isReady]);
+    }, [isFacilitator, isReady, facilitatorId, connect]);
+
+    const refreshData = useCallback(async () => {
+        if (isFacilitator) {
+            console.log("Facilitator manually broadcasting state.");
+            broadcastRef.current({ type: 'SET_STATE', payload: stateRef.current });
+            return;
+        } else {
+            console.log("Participant attempting to refresh data...");
+            await connect(facilitatorId);
+            console.log("Connection healthy. Requesting state from facilitator.");
+            sendRef.current(facilitatorId, { type: 'REQUEST_STATE' });
+        }
+    }, [isFacilitator, facilitatorId, connect]);
 
     return (
-        <CollaborationContext.Provider value={{ state, dispatch, currentUser }}>
+        <CollaborationContext.Provider value={{ state, dispatch, currentUser, refreshData }}>
             {children}
         </CollaborationContext.Provider>
     );
 }
 
 const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
-  const { state, dispatch, currentUser } = useCollaborationContext();
-  const { roomCode, mode, isVotingActive, icebreaker } = state;
+  const { state, dispatch, currentUser, refreshData } = useCollaborationContext();
+  const { roomCode, mode, isVotingActive, icebreaker, facilitatorId } = state;
   const [copyStatus, setCopyStatus] = useState('Copy Link');
+  const [refreshStatus, setRefreshStatus] = useState('Refresh');
   const roomUrl = `${window.location.origin}${window.location.pathname}#${roomCode}`;
+  const isFacilitator = currentUser.id === facilitatorId;
 
   useEffect(() => { document.body.classList.toggle('voting-active-bg', isVotingActive && mode === 'planning'); return () => { document.body.classList.remove('voting-active-bg'); } }, [isVotingActive, mode]);
   
   const handleCopyLink = () => {
     navigator.clipboard.writeText(roomUrl).then(() => { setCopyStatus('Copied!'); setTimeout(() => setCopyStatus('Copy Link'), 2000); });
+  };
+
+  const handleRefresh = async () => {
+    setRefreshStatus('Syncing...');
+    try {
+        await refreshData();
+        setRefreshStatus('Synced!');
+        setTimeout(() => setRefreshStatus('Refresh'), 2000);
+    } catch (error) {
+        console.error("Refresh failed:", error);
+        setRefreshStatus('Failed!');
+        setTimeout(() => setRefreshStatus('Refresh'), 3000);
+    }
+  };
+
+  const handleNewIcebreaker = () => {
+    const otherQuestions = ICEBREAKER_QUESTIONS.filter(q => q !== icebreaker);
+    const questionsPool = otherQuestions.length > 0 ? otherQuestions : ICEBREAKER_QUESTIONS;
+    const newIcebreaker = questionsPool[Math.floor(Math.random() * questionsPool.length)];
+    dispatch({ type: 'SET_ICEBREAKER', payload: newIcebreaker });
   };
   
   const handleSetMode = (targetMode: RoomMode) => dispatch({ type: 'SET_MODE', payload: targetMode });
@@ -219,9 +283,10 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
                 <h1 className="text-2xl sm:text-3xl font-bold text-sky-600 dark:text-sky-400">Scrum Room</h1>
-                <div className="flex items-center gap-2 mt-1">
+                <div className="flex items-center gap-4 mt-1">
                     <p className="text-sm text-slate-500 dark:text-slate-400">Room Code: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{roomCode}</span></p>
                     <button onClick={handleCopyLink} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline"><ClipboardIcon className="w-4 h-4" /> {copyStatus}</button>
+                    <button onClick={handleRefresh} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline" disabled={refreshStatus !== 'Refresh'}><RefreshIcon className="w-4 h-4" /> {refreshStatus}</button>
                 </div>
             </div>
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -230,7 +295,16 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
                 <ThemeToggle />
             </div>
         </div>
-        {icebreaker && (<div className="mt-4 text-center bg-sky-100/50 dark:bg-sky-900/20 p-3 rounded-lg"><p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Icebreaker: <span className="font-normal">{icebreaker}</span></p></div>)}
+        {icebreaker && (
+          <div className="mt-4 flex items-center justify-center gap-2 bg-sky-100/50 dark:bg-sky-900/20 p-3 rounded-lg">
+            <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Icebreaker: <span className="font-normal">{icebreaker}</span></p>
+            {isFacilitator && (
+              <button onClick={handleNewIcebreaker} title="New icebreaker" className="p-1 rounded-full hover:bg-slate-300/50 dark:hover:bg-slate-600/50 transition-colors">
+                <RefreshIcon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              </button>
+            )}
+          </div>
+        )}
       </header>
       <main className="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 mt-4">
         <div className="lg:col-span-1"><ParticipantList /></div>
@@ -243,32 +317,73 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
 // --- ROOT APP COMPONENT ---
 export default function App() {
   const [roomInfo, setRoomInfo] = useState<{ code: string; participant: Participant; facilitatorId: string } | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
 
-  const joinRoom = (name: string, code: string, avatar: string, isCreating: boolean) => {
-    // The facilitator's internal PeerJS ID is derived from the public room code.
-    // This makes it predictable for others to connect to, but distinct from the room code itself.
+  const joinRoom = useCallback(async (name: string, code: string, avatar: string) => {
+    setIsJoining(true);
     const facilitatorPeerId = `scrum-facilitator-peer-${code}`;
-    
-    // Participants get a unique, fresh ID every time they join a room.
-    const myPeerId = isCreating ? facilitatorPeerId : crypto.randomUUID();
-    
-    const participant: Participant = { id: myPeerId, name, avatar };
-    
-    // The public-facing code in the URL and UI remains the simple one.
-    setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId });
 
-    const newHash = `${code}`;
-    if (window.location.hash !== `#${newHash}`) {
-        window.location.hash = newHash;
+    const setHash = () => {
+        const newHash = `${code}`;
+        if (window.location.hash !== `#${newHash}`) {
+            window.location.hash = newHash;
+        }
+    };
+
+    const participantPeerId = `scrum-participant-${Math.random().toString(36).substr(2, 9)}`;
+    let tempPeer: any = null;
+
+    try {
+        // @ts-ignore - PeerJS is loaded from a script tag
+        tempPeer = new Peer(participantPeerId);
+
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 7000);
+            tempPeer.on('open', () => { clearTimeout(timeout); resolve(); });
+            tempPeer.on('error', (err: Error) => { clearTimeout(timeout); reject(err); });
+        });
+
+        const conn = tempPeer.connect(facilitatorPeerId, { reliable: true });
+        if (!conn) throw new Error("Failed to create connection object.");
+
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Facilitator connection timed out.")), 7000);
+            conn.on('open', () => {
+                conn.close();
+                clearTimeout(timeout);
+                resolve();
+            });
+            conn.on('error', (err: Error) => { clearTimeout(timeout); reject(err); });
+        });
+        
+        console.log("Facilitator found. Joining as participant.");
+        const participant: Participant = { id: participantPeerId, name, avatar };
+        setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId });
+
+    } catch (error) {
+        console.warn("Could not connect to facilitator, creating room instead.", error);
+        const participant: Participant = { id: facilitatorPeerId, name, avatar };
+        setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId });
+    } finally {
+        if (tempPeer) tempPeer.destroy();
+        setHash();
+        setIsJoining(false);
     }
-  };
+  }, []);
 
-  const leaveRoom = () => { setRoomInfo(null); window.location.hash = ''; }
-
-  if (!roomInfo) return <Lobby onJoinRoom={joinRoom} />;
+  const leaveRoom = useCallback(() => { 
+      setRoomInfo(null); 
+      window.location.hash = ''; 
+  }, []);
+  
+  if (!roomInfo) return <Lobby onJoinRoom={joinRoom} isJoining={isJoining} />;
   
   return (
-    <CollaborationProvider roomCode={roomInfo.code} currentUser={roomInfo.participant} facilitatorId={roomInfo.facilitatorId}>
+    <CollaborationProvider 
+        roomCode={roomInfo.code} 
+        currentUser={roomInfo.participant} 
+        facilitatorId={roomInfo.facilitatorId}
+    >
         <Room onLeave={leaveRoom} />
     </CollaborationProvider>
   );

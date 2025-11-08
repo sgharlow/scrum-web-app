@@ -110,6 +110,8 @@ export const appReducer = (state: AppState, action: Action): AppState => {
     }
     case 'SET_ICEBREAKER':
       return { ...state, icebreaker: action.payload };
+    case 'SET_FACILITATOR':
+      return { ...state, facilitatorId: action.payload };
     default:
       return state;
   }

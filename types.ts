@@ -71,4 +71,5 @@ export type Action =
   | { type: 'DELETE_RETRO_CARD'; payload: { columnId: RetroColumnId; cardId: string } }
   | { type: 'SORT_RETRO_COLUMN'; payload: RetroColumnId }
   | { type: 'MOVE_RETRO_CARD'; payload: { sourceColumnId: RetroColumnId; destColumnId: RetroColumnId; cardId: string, insertAtIndex: number } }
-  | { type: 'SET_ICEBREAKER'; payload: string };
+  | { type: 'SET_ICEBREAKER'; payload: string }
+  | { type: 'SET_FACILITATOR'; payload: string };

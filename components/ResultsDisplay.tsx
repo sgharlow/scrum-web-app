@@ -26,7 +26,11 @@ export default function ResultsDisplay() {
   const numericVotes = Object.values(votes).filter((v): v is number => typeof v === 'number');
   const minVote = numericVotes.length > 0 ? Math.min(...numericVotes) : null;
   const maxVote = numericVotes.length > 0 ? Math.max(...numericVotes) : null;
-  const maxCount = Math.max(...Object.values(voteCounts), 0);
+  
+  const numericVoteValues = sortedVotes
+    .map(({ value }) => parseFloat(value))
+    .filter(v => !isNaN(v));
+  const maxVoteValue = numericVoteValues.length > 0 ? Math.max(...numericVoteValues) : 1;
   
   const specialVotes = Object.entries(votes)
     .filter(([, value]) => typeof value !== 'number')
@@ -50,17 +54,21 @@ export default function ResultsDisplay() {
       
       {sortedVotes.length > 0 ? (
         <div className="flex justify-center items-end gap-4 h-40">
-            {sortedVotes.map(({ value, count }) => (
+            {sortedVotes.map(({ value, count }) => {
+              const numericValue = parseFloat(value);
+              const height = isNaN(numericValue) ? 10 : (numericValue / maxVoteValue) * 90 + 10;
+              return (
                 <div key={value} className="flex flex-col items-center h-full justify-end" title={`${count} vote(s)`}>
                     <div
                         className={`w-12 rounded-t-md transition-all duration-500 ${getBarColor(value)}`}
-                        style={{ height: `${(count / maxCount) * 100}%` }}
+                        style={{ height: `${height}%` }}
                     >
                         <span className="relative -top-6 text-white font-bold text-sm">{count}</span>
                     </div>
                     <div className="mt-2 text-lg font-bold text-slate-700 dark:text-slate-200">{value}</div>
                 </div>
-            ))}
+              );
+            })}
         </div>
       ) : (
         <p className="text-center text-slate-500">No votes have been cast.</p>

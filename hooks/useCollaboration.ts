@@ -54,9 +54,7 @@ export const useCollaboration = ({ myId, onMessage, onOpen, onPeerDisconnect }: 
         if (!myId) return;
 
         const peer = new Peer(myId, {
-            // Using the public PeerJS cloud server for signaling.
-            // For production, a self-hosted PeerServer is recommended for reliability.
-            debug: 2 // 0: errors, 1: warnings, 2: info, 3: verbose
+            debug: 2 
         });
         peerRef.current = peer;
 
@@ -74,9 +72,6 @@ export const useCollaboration = ({ myId, onMessage, onOpen, onPeerDisconnect }: 
 
         peer.on('error', (err: any) => {
             console.error('PeerJS error:', err);
-            if (err.type === 'peer-unavailable') {
-                alert("Could not connect to the facilitator. Please check the room code and ensure the facilitator is in the room.");
-            }
         });
 
         return () => {
@@ -85,18 +80,48 @@ export const useCollaboration = ({ myId, onMessage, onOpen, onPeerDisconnect }: 
         };
     }, [myId, handleNewConnection]);
 
-    const connect = useCallback((peerId: string) => {
-        if (!peerRef.current || connectionsRef.current[peerId]?.open) {
-            console.log(`Already connected or connecting to ${peerId}`);
-            return;
-        }
-        console.log(`Attempting to connect to ${peerId}`);
-        const conn = peerRef.current.connect(peerId, { reliable: true });
-        if(conn){
-            handleNewConnection(conn);
-        } else {
-            console.error(`Failed to create connection to ${peerId}`);
-        }
+    const connect = useCallback((peerId: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+            if (!peerRef.current || peerRef.current.destroyed) {
+                return reject(new Error("Peer is not initialized or is destroyed."));
+            }
+    
+            console.log(`Attempting to connect/re-verify connection to ${peerId}`);
+            const conn = peerRef.current.connect(peerId, { reliable: true });
+            
+            if (!conn) {
+                return reject(new Error(`Failed to create connection object for ${peerId}`));
+            }
+    
+            const timeoutId = setTimeout(() => {
+                console.warn(`Connection attempt to ${peerId} timed out.`);
+                cleanup();
+                conn.close();
+                reject(new Error(`Connection to ${peerId} timed out.`));
+            }, 7000);
+    
+            const onOpen = () => {
+                clearTimeout(timeoutId);
+                cleanup();
+                handleNewConnection(conn);
+                resolve();
+            };
+    
+            const onError = (err: any) => {
+                clearTimeout(timeoutId);
+                cleanup();
+                console.error(`Connection object for ${peerId} emitted error:`, err);
+                reject(err);
+            };
+            
+            const cleanup = () => {
+                 conn.off('open', onOpen);
+                 conn.off('error', onError);
+            };
+    
+            conn.on('open', onOpen);
+            conn.on('error', onError);
+        });
     }, [handleNewConnection]);
 
     const broadcast = (payload: unknown) => {
