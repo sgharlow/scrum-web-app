@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 
 // PeerJS is loaded from a script tag in index.html
 declare var Peer: any; 
@@ -13,6 +13,7 @@ type UseCollaborationProps = {
 export const useCollaboration = ({ myId, onMessage, onOpen, onPeerDisconnect }: UseCollaborationProps) => {
     const peerRef = useRef<any>(null);
     const connectionsRef = useRef<Record<string, any>>({});
+    const [isReady, setIsReady] = useState(false);
 
     const handleNewConnection = useCallback((conn: any) => {
         if (connectionsRef.current[conn.peer]) {
@@ -61,6 +62,7 @@ export const useCollaboration = ({ myId, onMessage, onOpen, onPeerDisconnect }: 
 
         peer.on('open', (id: string) => {
             console.log('My peer ID is: ' + id);
+            setIsReady(true);
         });
 
         peer.on('connection', handleNewConnection);
@@ -116,5 +118,5 @@ export const useCollaboration = ({ myId, onMessage, onOpen, onPeerDisconnect }: 
         }
     };
 
-    return { connect, broadcast, send };
+    return { connect, broadcast, send, isReady };
 };

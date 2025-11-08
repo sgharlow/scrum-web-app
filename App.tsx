@@ -178,18 +178,18 @@ const CollaborationProvider: React.FC<{ children: React.ReactNode, roomCode: str
         }
     }, [isFacilitator]);
 
-    const { connect, broadcast, send } = useCollaboration({ myId: currentUser.id, onMessage, onOpen, onPeerDisconnect });
+    const { connect, broadcast, send, isReady } = useCollaboration({ myId: currentUser.id, onMessage, onOpen, onPeerDisconnect });
     
     broadcastRef.current = broadcast;
     sendRef.current = send;
 
-    // Auto-connect for participants to the facilitator
+    // Auto-connect for participants to the facilitator, only after their own peer is ready.
     useEffect(() => {
-        if (!isFacilitator) {
-            console.log(`Participant connecting to facilitator: ${facilitatorId}`);
+        if (!isFacilitator && isReady) {
+            console.log(`Participant is ready, connecting to facilitator: ${facilitatorId}`);
             connect(facilitatorId);
         }
-    }, [isFacilitator, facilitatorId, connect]);
+    }, [isFacilitator, facilitatorId, connect, isReady]);
 
     return (
         <CollaborationContext.Provider value={{ state, dispatch, currentUser }}>
@@ -243,15 +243,18 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
 // --- ROOT APP COMPONENT ---
 export default function App() {
   const [roomInfo, setRoomInfo] = useState<{ code: string; participant: Participant; facilitatorId: string } | null>(null);
-  const myIdRef = useRef(crypto.randomUUID());
 
   const joinRoom = (name: string, code: string, avatar: string, isCreating: boolean) => {
-    // The facilitator's peer ID must be predictable for others to connect.
-    const facilitatorPeerId = `scrum-facilitator-${code}`;
-    // Participants get a unique, random ID.
-    const myPeerId = isCreating ? facilitatorPeerId : myIdRef.current;
+    // The facilitator's internal PeerJS ID is derived from the public room code.
+    // This makes it predictable for others to connect to, but distinct from the room code itself.
+    const facilitatorPeerId = `scrum-facilitator-peer-${code}`;
+    
+    // Participants get a unique, fresh ID every time they join a room.
+    const myPeerId = isCreating ? facilitatorPeerId : crypto.randomUUID();
     
     const participant: Participant = { id: myPeerId, name, avatar };
+    
+    // The public-facing code in the URL and UI remains the simple one.
     setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId });
 
     const newHash = `${code}`;
