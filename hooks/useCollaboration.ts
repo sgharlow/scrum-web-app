@@ -169,7 +169,10 @@ export const useCollaboration = ({ peer, isFacilitator, facilitatorId, onMessage
             if (!isFacilitator) setConnectionStatus('connecting');
 
             console.log(`Attempting to connect/re-verify connection to ${peerId}`);
-            const conn = peerRef.current.connect(peerId, { reliable: true });
+            const conn = peerRef.current.connect(peerId, {
+                reliable: true,
+                serialization: 'json'
+            });
             
             if (!conn) {
                 if (!isFacilitator) setConnectionStatus('disconnected');

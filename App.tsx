@@ -476,14 +476,16 @@ export default function App() {
                             username: "webrtc@live.com",
                             credential: "muazkh"
                         }
-                    ]
+                    ],
+                    'iceTransportPolicy': 'all',
+                    'iceCandidatePoolSize': 10
                 }
             });
-            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 10000);
+            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 8000);
             newPeer.on('open', () => { clearTimeout(timeout); resolve(newPeer); });
-            newPeer.on('error', (err: any) => { 
-                clearTimeout(timeout); 
-                reject(err); 
+            newPeer.on('error', (err: any) => {
+                clearTimeout(timeout);
+                reject(err);
             });
         });
     };
@@ -493,6 +495,10 @@ export default function App() {
         console.log(`Attempting to become facilitator for room ${code} with ID ${facilitatorPeerId}`);
         const facilitatorPeer = await initializePeer(facilitatorPeerId);
         console.log("Successfully became facilitator.");
+
+        // Small delay to ensure facilitator is fully initialized and ready to accept connections
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         const participant: Participant = { id: facilitatorPeerId, name, avatar };
         setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId, peer: facilitatorPeer, initialConnection: null });
         setHash();
@@ -502,33 +508,46 @@ export default function App() {
         // This is the expected path for a participant joining an existing room.
         if (error.type === 'unavailable-id') {
             console.log("Facilitator already exists. Joining as participant.");
-            
+
+            // Create peer once and reuse for all connection attempts
+            const participantPeerId = `scrum-participant-${Math.random().toString(36).substr(2, 9)}`;
+            let participantPeer: any = null;
+
+            try {
+                participantPeer = await initializePeer(participantPeerId);
+                console.log(`Peer initialized as ${participantPeerId}`);
+            } catch (peerError: any) {
+                console.error("Failed to initialize peer:", peerError);
+                setJoinError("Could not connect to signaling server. Please check your network and try again.");
+                setIsJoining(false);
+                return;
+            }
+
             const MAX_RETRIES = 3;
-            const RETRY_DELAY = 2000; // 2 seconds
+            const RETRY_DELAY = 1000; // 1 second between retries
             let lastError: any = null;
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                let participantPeer: any = null;
                 try {
-                    console.log(`Attempt ${attempt} to join room ${code}...`);
-                    const participantPeerId = `scrum-participant-${Math.random().toString(36).substr(2, 9)}`;
-                    participantPeer = await initializePeer(participantPeerId);
+                    console.log(`Attempt ${attempt} to connect to facilitator ${facilitatorPeerId}...`);
 
-                    console.log(`Connecting to facilitator ${facilitatorPeerId}`);
                     const conn = await new Promise<any>((resolve, reject) => {
-                        const connection = participantPeer.connect(facilitatorPeerId, { reliable: true });
-                        if (!connection) return reject(new Error("Failed to create connection object."));
-                        
-                        // Increased timeout to allow more time for NAT traversal and relay connection
-                        const timeout = setTimeout(() => reject(new Error("Connection to facilitator timed out.")), 20000);
-                        
-                        connection.on('open', () => { 
-                            clearTimeout(timeout); 
-                            resolve(connection); 
+                        const connection = participantPeer.connect(facilitatorPeerId, {
+                            reliable: true,
+                            serialization: 'json'
                         });
-                        connection.on('error', (err: any) => { 
-                            clearTimeout(timeout); 
-                            reject(err); 
+                        if (!connection) return reject(new Error("Failed to create connection object."));
+
+                        // Longer timeout to allow WebRTC to establish connection through NAT/TURN
+                        const timeout = setTimeout(() => reject(new Error("Connection to facilitator timed out.")), 15000);
+
+                        connection.on('open', () => {
+                            clearTimeout(timeout);
+                            resolve(connection);
+                        });
+                        connection.on('error', (err: any) => {
+                            clearTimeout(timeout);
+                            reject(err);
                         });
                     });
 
@@ -542,13 +561,17 @@ export default function App() {
                 } catch (participantError: any) {
                     console.error(`Attempt ${attempt} failed:`, participantError);
                     lastError = participantError;
-                    if (participantPeer && !participantPeer.destroyed) participantPeer.destroy();
-                    
+
                     if (attempt < MAX_RETRIES) {
-                        console.log(`Waiting ${RETRY_DELAY}ms before next attempt...`);
+                        console.log(`Waiting ${RETRY_DELAY}ms before retry ${attempt + 1}...`);
                         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
                     }
                 }
+            }
+
+            // All retries failed, clean up peer
+            if (participantPeer && !participantPeer.destroyed) {
+                participantPeer.destroy();
             }
             
             // If loop completes without success
