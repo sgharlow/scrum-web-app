@@ -51,6 +51,8 @@ export interface AppState {
   icebreaker: string;
 }
 
+export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+
 export type Action =
   | { type: 'SET_STATE'; payload: AppState }
   | { type: 'SET_MODE'; payload: RoomMode }

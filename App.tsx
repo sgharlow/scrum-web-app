@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef, useContext, useReducer, useCallback } from 'react';
-import type { Story, VoteValue, RoomMode, Participant, AppState, Action } from './types';
+import type { Story, VoteValue, RoomMode, Participant, AppState, Action, ConnectionStatus } from './types';
 import ParticipantList from './components/ParticipantList';
 import PlanningView from './components/StoryLane';
 import RetroMode from './components/RetroMode';
@@ -16,6 +16,8 @@ const CollaborationContext = React.createContext<{
     dispatch: React.Dispatch<Action>;
     currentUser: Participant;
     refreshData: () => Promise<void>;
+    connectionStatus: ConnectionStatus;
+    reconnect: () => void;
 } | null>(null);
 
 export const useCollaborationContext = () => {
@@ -28,6 +30,10 @@ export const useCollaborationContext = () => {
 const adjectives = ['Agile', 'Brave', 'Clever', 'Devoted', 'Eager', 'Fearless', 'Great', 'Happy', 'Intrepid', 'Jolly', 'Keen', 'Lucky'];
 const nouns = ['Aardvark', 'Badger', 'Cheetah', 'Dolphin', 'Eagle', 'Falcon', 'Gibbon', 'Heron', 'Ibex', 'Jaguar', 'Koala', 'Lemur'];
 const generateRandomName = () => `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
+const codeAdjectives = ['Swift', 'Red', 'Blue', 'Green', 'Solar', 'Lunar', 'Cosmic', 'Magic'];
+const codeNouns = ['River', 'Mountain', 'Forest', 'Star', 'Planet', 'Comet', 'Galaxy', 'Nebula'];
+const generateRandomRoomCode = () => `${codeAdjectives[Math.floor(Math.random() * codeAdjectives.length)]}-${codeNouns[Math.floor(Math.random() * codeNouns.length)]}-${Math.floor(100 + Math.random() * 900)}`;
+
 
 // --- THEME TOGGLE ---
 const ThemeToggle: React.FC = () => {
@@ -71,8 +77,9 @@ const Lobby: React.FC<{
 
   const handleSubmit = (e: React.FormEvent) => { 
       e.preventDefault(); 
-      if (name.trim() && code.trim()) {
-          onJoinRoom(name.trim(), code.trim(), selectedAvatar);
+      if (name.trim()) {
+          const roomCode = code.trim() || generateRandomRoomCode();
+          onJoinRoom(name.trim(), roomCode, selectedAvatar);
       }
   };
 
@@ -89,8 +96,8 @@ const Lobby: React.FC<{
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
-            <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter Room Code" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
-            <button type="submit" disabled={!name.trim() || !code.trim() || isJoining} className="w-full px-6 py-4 bg-sky-600 text-white font-bold text-lg rounded-md hover:bg-sky-700 disabled:bg-slate-400 transition-colors">
+            <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter Room Code (or leave blank)" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
+            <button type="submit" disabled={!name.trim() || isJoining} className="w-full px-6 py-4 bg-sky-600 text-white font-bold text-lg rounded-md hover:bg-sky-700 disabled:bg-slate-400 transition-colors">
                 {isJoining ? 'Connecting...' : 'Create / Join Room'}
             </button>
         </form>
@@ -141,56 +148,45 @@ const CollaborationProvider: React.FC<{
     const broadcastRef = useRef<(payload: any) => void>(() => {});
     const sendRef = useRef<(peerId: string, payload: any) => void>(() => {});
 
-    // This effect synchronizes the facilitator's state to all participants
-    useEffect(() => {
-        if (isFacilitator) {
-            broadcastRef.current({ type: 'SET_STATE', payload: state });
-        }
-    }, [state, isFacilitator]);
-
-    const dispatch = (action: Action) => {
+    const dispatch = useCallback((action: Action) => {
         if (isFacilitator) {
             localDispatch(action);
+            broadcastRef.current(action);
         } else {
             // Participants send their actions to the facilitator to be processed.
             sendRef.current(facilitatorId, action);
         }
-    };
+    }, [isFacilitator, facilitatorId]);
 
     const onMessage = useCallback((senderId: string, message: any) => {
         if (isFacilitator) {
             if (message.type === 'INTRODUCE_AND_REQUEST_STATE') {
-                console.log(`New participant ${senderId} joined, sending them the current state.`);
+                console.log(`New participant ${senderId} joined. Sending state and introducing.`);
                 const participant = message.payload as Participant;
                 
-                if (stateRef.current.participants.some(p => p.id === participant.id)) {
-                     sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
-                     return;
-                }
+                // Send current state back to the new joiner for immediate sync
+                sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
 
-                const newParticipants = [...stateRef.current.participants, participant];
-                const nextState: AppState = { ...stateRef.current, participants: newParticipants };
-                
-                localDispatch({ type: 'SET_STATE', payload: nextState });
-                sendRef.current(senderId, { type: 'SET_STATE', payload: nextState });
+                // Dispatch the action to add the participant. This will be broadcast to everyone.
+                dispatch({ type: 'ADD_PARTICIPANT', payload: participant });
 
             } else if (message.type === 'REQUEST_STATE') {
                 console.log(`Received state request from ${senderId}. Sending current state back.`);
                 sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
             } else {
-                localDispatch(message as Action);
+                // An action from a participant. Let the facilitator process it.
+                // The `dispatch` call will handle local state update + broadcast.
+                dispatch(message as Action);
             }
         } else {
+            // Participant receives either a full state dump or an incremental action
             if (message.type === 'SET_STATE') {
-                const remoteState = message.payload as AppState;
-                remoteState.participants = [
-                    ...remoteState.participants.filter(p => p.id !== currentUser.id),
-                    currentUser
-                ];
-                localDispatch({ type: 'SET_STATE', payload: remoteState });
+                localDispatch({ type: 'SET_STATE', payload: message.payload as AppState });
+            } else {
+                localDispatch(message as Action);
             }
         }
-    }, [isFacilitator, currentUser]);
+    }, [isFacilitator, dispatch]);
     
     const onOpen = useCallback((peerId: string) => {
         console.log(`Connection opened with ${peerId}.`);
@@ -202,11 +198,18 @@ const CollaborationProvider: React.FC<{
     const onPeerDisconnect = useCallback((peerId: string) => {
         console.log('Peer disconnected:', peerId);
         if (isFacilitator) {
-            localDispatch({ type: 'REMOVE_PARTICIPANT', payload: peerId });
+            dispatch({ type: 'REMOVE_PARTICIPANT', payload: peerId });
         }
-    }, [isFacilitator]);
+    }, [isFacilitator, dispatch]);
 
-    const { connect, broadcast, send, isReady } = useCollaboration({ myId: currentUser.id, onMessage, onOpen, onPeerDisconnect });
+    const { connect, broadcast, send, isReady, connectionStatus, reconnect } = useCollaboration({ 
+        myId: currentUser.id, 
+        isFacilitator,
+        facilitatorId,
+        onMessage, 
+        onOpen, 
+        onPeerDisconnect 
+    });
     
     broadcastRef.current = broadcast;
     sendRef.current = send;
@@ -215,14 +218,13 @@ const CollaborationProvider: React.FC<{
         if (!isFacilitator && isReady) {
             connect(facilitatorId).catch(error => {
                 console.error("Connection failed unexpectedly after pre-check. The facilitator may have left.", error);
-                alert("Connection failed. The facilitator may have left. Please refresh the page to rejoin.");
             });
         }
     }, [isFacilitator, isReady, facilitatorId, connect]);
 
     const refreshData = useCallback(async () => {
         if (isFacilitator) {
-            console.log("Facilitator manually broadcasting state.");
+            console.log("Facilitator manually broadcasting full state to all.");
             broadcastRef.current({ type: 'SET_STATE', payload: stateRef.current });
             return;
         } else {
@@ -234,14 +236,32 @@ const CollaborationProvider: React.FC<{
     }, [isFacilitator, facilitatorId, connect]);
 
     return (
-        <CollaborationContext.Provider value={{ state, dispatch, currentUser, refreshData }}>
+        <CollaborationContext.Provider value={{ state, dispatch, currentUser, refreshData, connectionStatus, reconnect }}>
             {children}
         </CollaborationContext.Provider>
     );
 }
 
+const ConnectionStatusIndicator: React.FC = () => {
+    const { connectionStatus } = useCollaborationContext();
+    const statusMap = {
+        connected: { color: 'bg-green-500', text: 'Connected to room' },
+        connecting: { color: 'bg-yellow-500 animate-pulse', text: 'Connecting...' },
+        disconnected: { color: 'bg-red-500', text: 'Connection lost. Attempting to reconnect...' },
+    };
+    const { color, text } = statusMap[connectionStatus];
+    return (
+        <div className="flex items-center gap-2 group relative">
+            <div className={`w-3 h-3 rounded-full transition-colors ${color}`}></div>
+            <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 w-max bg-slate-700 text-white text-xs rounded py-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                {text}
+            </div>
+        </div>
+    );
+}
+
 const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
-  const { state, dispatch, currentUser, refreshData } = useCollaborationContext();
+  const { state, dispatch, currentUser, refreshData, connectionStatus, reconnect } = useCollaborationContext();
   const { roomCode, mode, isVotingActive, icebreaker, facilitatorId } = state;
   const [copyStatus, setCopyStatus] = useState('Copy Link');
   const [refreshStatus, setRefreshStatus] = useState('Refresh');
@@ -255,6 +275,10 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
   };
 
   const handleRefresh = async () => {
+    if (connectionStatus === 'disconnected') {
+        reconnect();
+        return;
+    }
     setRefreshStatus('Syncing...');
     try {
         await refreshData();
@@ -286,7 +310,10 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
                 <div className="flex items-center gap-4 mt-1">
                     <p className="text-sm text-slate-500 dark:text-slate-400">Room Code: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{roomCode}</span></p>
                     <button onClick={handleCopyLink} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline"><ClipboardIcon className="w-4 h-4" /> {copyStatus}</button>
-                    <button onClick={handleRefresh} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline" disabled={refreshStatus !== 'Refresh'}><RefreshIcon className="w-4 h-4" /> {refreshStatus}</button>
+                    <button onClick={handleRefresh} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline" disabled={refreshStatus !== 'Refresh' && connectionStatus !== 'disconnected'}>
+                        <RefreshIcon className="w-4 h-4" /> {connectionStatus === 'disconnected' ? 'Reconnect' : refreshStatus}
+                    </button>
+                    {!isFacilitator && <ConnectionStatusIndicator />}
                 </div>
             </div>
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
