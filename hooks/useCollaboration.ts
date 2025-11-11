@@ -21,6 +21,7 @@ const CONNECTION_TIMEOUT = 15000; // 15 seconds
 export const useCollaboration = ({ peer, isFacilitator, facilitatorId, onMessage, onOpen, onPeerDisconnect, initialConnection }: UseCollaborationProps) => {
     const peerRef = useRef<any>(null);
     const connectionsRef = useRef<Record<string, any>>({});
+    const processedConnectionsRef = useRef<Set<any>>(new Set());
     const [isReady, setIsReady] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
     const heartbeatTimeoutRef = useRef<number | null>(null);
@@ -50,6 +51,13 @@ export const useCollaboration = ({ peer, isFacilitator, facilitatorId, onMessage
     }, []);
 
     const handleNewConnection = useCallback((conn: any) => {
+        // Check if we've already processed this exact connection object
+        if (processedConnectionsRef.current.has(conn)) {
+            console.log(`Connection ${conn.peer} already processed, skipping duplicate setup.`);
+            return;
+        }
+        processedConnectionsRef.current.add(conn);
+
         if (connectionsRef.current[conn.peer]) {
             console.warn(`Duplicate connection from ${conn.peer}, closing old one.`);
             connectionsRef.current[conn.peer].close();
@@ -69,6 +77,7 @@ export const useCollaboration = ({ peer, isFacilitator, facilitatorId, onMessage
             console.log(`Connection with ${conn.peer} closed.`);
             internalStateRef.current.onPeerDisconnect(conn.peer);
             delete connectionsRef.current[conn.peer];
+            processedConnectionsRef.current.delete(conn);
             if (conn.peer === internalStateRef.current.facilitatorId) {
                 setConnectionStatus('disconnected');
             }
