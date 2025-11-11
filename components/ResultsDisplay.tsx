@@ -4,9 +4,11 @@ import { useCollaborationContext } from '../App';
 
 export default function ResultsDisplay() {
   const { state } = useCollaborationContext();
-  const { votes, participants, areVotesRevealed } = state;
+  const { votes, participants, areVotesRevealed, currentStoryId, stories } = state;
 
   if (!areVotesRevealed) return null;
+
+  const currentStory = stories.find(s => s.id === currentStoryId);
 
   const voteCounts = Object.values(votes).reduce((acc, vote) => {
     const key = String(vote);
@@ -84,6 +86,15 @@ export default function ResultsDisplay() {
                     </li>
                 ))}
             </ul>
+        </div>
+      )}
+
+      {currentStory && currentStory.estimate != null && (
+        <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+          <h3 className="text-md font-semibold text-center text-slate-600 dark:text-slate-300">Agreed Estimate</h3>
+          <div className="flex justify-center items-center gap-2 mt-2">
+              <p className="text-4xl font-bold text-sky-600 dark:text-sky-400">{currentStory.estimate}</p>
+          </div>
         </div>
       )}
     </div>

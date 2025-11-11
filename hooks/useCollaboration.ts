@@ -1,3 +1,4 @@
+
 import { useRef, useEffect, useCallback, useState } from 'react';
 import type { ConnectionStatus } from '../types';
 
@@ -5,30 +6,29 @@ import type { ConnectionStatus } from '../types';
 declare var Peer: any; 
 
 type UseCollaborationProps = {
-    myId: string;
+    peer: any;
     isFacilitator: boolean;
     facilitatorId: string;
     onMessage: (senderId: string, data: any) => void;
     onOpen: (peerId: string) => void;
     onPeerDisconnect: (peerId: string) => void;
+    initialConnection: any | null;
 };
 
 const PING_INTERVAL = 5000; // 5 seconds
 const CONNECTION_TIMEOUT = 15000; // 15 seconds
 
-export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage, onOpen, onPeerDisconnect }: UseCollaborationProps) => {
+export const useCollaboration = ({ peer, isFacilitator, facilitatorId, onMessage, onOpen, onPeerDisconnect, initialConnection }: UseCollaborationProps) => {
     const peerRef = useRef<any>(null);
     const connectionsRef = useRef<Record<string, any>>({});
     const [isReady, setIsReady] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
     const heartbeatTimeoutRef = useRef<number | null>(null);
 
-    // Use a single ref to hold all callbacks and props that change over time.
-    // This allows our stable event handlers to always access the latest values, preventing stale closures.
-    const internalStateRef = useRef({ onMessage, onOpen, onPeerDisconnect, facilitatorId });
+    const internalStateRef = useRef({ onMessage, onOpen, onPeerDisconnect, facilitatorId, isFacilitator, initialConnection });
     useEffect(() => {
-        internalStateRef.current = { onMessage, onOpen, onPeerDisconnect, facilitatorId };
-    }, [onMessage, onOpen, onPeerDisconnect, facilitatorId]);
+        internalStateRef.current = { onMessage, onOpen, onPeerDisconnect, facilitatorId, isFacilitator, initialConnection };
+    }, [onMessage, onOpen, onPeerDisconnect, facilitatorId, isFacilitator, initialConnection]);
 
     const handleMessage = useCallback((senderId: string, message: any) => {
         if (message.type === 'PING') {
@@ -47,7 +47,7 @@ export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage
         } else {
             internalStateRef.current.onMessage(senderId, message);
         }
-    }, []); // This function is now stable and created only once.
+    }, []);
 
     const handleNewConnection = useCallback((conn: any) => {
         if (connectionsRef.current[conn.peer]) {
@@ -56,11 +56,7 @@ export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage
         }
         connectionsRef.current[conn.peer] = conn;
 
-        conn.on('open', () => {
-            console.log(`Data channel opened with ${conn.peer}`);
-            internalStateRef.current.onOpen(conn.peer);
-        });
-
+        // Attach listeners that can fire at any time after creation
         conn.on('data', (data: string) => {
             try {
                 handleMessage(conn.peer, JSON.parse(data));
@@ -81,21 +77,39 @@ export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage
         conn.on('close', handleClose);
         conn.on('error', (err: any) => {
              console.error(`Connection error with ${conn.peer}:`, err);
-             handleClose(); // Treat error as a close event for cleanup
+             handleClose();
         });
-    }, [handleMessage]); // Stable because handleMessage is stable.
 
-    // Peer initialization and event listener setup
+        // Now, handle the 'open' event, which might have already happened for initial connections.
+        if (conn.open) {
+            console.log(`Data channel with ${conn.peer} was already open.`);
+            internalStateRef.current.onOpen(conn.peer);
+        } else {
+            conn.on('open', () => {
+                console.log(`Data channel opened with ${conn.peer}`);
+                internalStateRef.current.onOpen(conn.peer);
+            });
+        }
+    }, [handleMessage]);
+
     useEffect(() => {
-        if (!myId || peerRef.current) return; // Only run once for a given myId
+        if (!peer || peer.destroyed) {
+            console.warn("useCollaboration received no peer or a destroyed peer.");
+            return;
+        }
 
-        const peer = new Peer(myId, { debug: 2 });
         peerRef.current = peer;
+        setIsReady(true);
+        
+        if (initialConnection) {
+            console.log("Hook received an initial connection, setting it up.");
+            // Use a timeout to ensure all other state has settled before processing
+            setTimeout(() => handleNewConnection(initialConnection), 0);
+        }
 
-        peer.on('open', (id: string) => {
-            console.log('My peer ID is: ' + id);
-            setIsReady(true);
-        });
+        peer.off('connection', handleNewConnection);
+        peer.off('disconnected');
+        peer.off('error');
 
         peer.on('connection', handleNewConnection);
 
@@ -106,28 +120,25 @@ export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage
 
         peer.on('error', (err: any) => {
             console.error('PeerJS error:', err);
-            if (err.type === 'peer-unavailable' && !isFacilitator) {
+            if (err.type === 'peer-unavailable' && !internalStateRef.current.isFacilitator) {
                 setConnectionStatus('disconnected');
             }
         });
 
         return () => {
-            console.log("Destroying peer connection.");
+            if (peerRef.current) {
+                peerRef.current.off('connection', handleNewConnection);
+            }
             if (heartbeatTimeoutRef.current) clearTimeout(heartbeatTimeoutRef.current);
-            peer.destroy();
-            peerRef.current = null;
         };
-    }, [myId, isFacilitator, handleNewConnection]);
+    }, [peer, initialConnection, handleNewConnection]);
 
-    // Facilitator's heartbeat sender
     useEffect(() => {
         if (isFacilitator && isReady) {
             const intervalId = setInterval(() => {
                 const pingMsg = JSON.stringify({ type: 'PING' });
                 Object.values(connectionsRef.current).forEach((conn: any) => {
-                    if (conn?.open) {
-                        conn.send(pingMsg);
-                    }
+                    if (conn?.open) conn.send(pingMsg);
                 });
             }, PING_INTERVAL);
             setConnectionStatus('connected');
@@ -139,6 +150,11 @@ export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage
         return new Promise((resolve, reject) => {
             if (!peerRef.current || peerRef.current.destroyed) {
                 return reject(new Error("Peer is not initialized or is destroyed."));
+            }
+            
+            // If we already have a connection, resolve immediately.
+            if (connectionsRef.current[peerId]?.open) {
+                return resolve();
             }
     
             if (!isFacilitator) setConnectionStatus('connecting');
@@ -223,6 +239,13 @@ export const useCollaboration = ({ myId, isFacilitator, facilitatorId, onMessage
             console.warn(`No open channel for peer ${peerId}`);
         }
     };
+
+    // If an initial connection is provided for a participant, their status is connected from the start.
+    useEffect(() => {
+      if(initialConnection && !isFacilitator) {
+        setConnectionStatus('connected');
+      }
+    }, [initialConnection, isFacilitator]);
 
     return { connect, broadcast, send, isReady, connectionStatus, reconnect };
 };

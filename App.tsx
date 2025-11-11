@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect, useRef, useContext, useReducer, useCallback } from 'react';
 import type { Story, VoteValue, RoomMode, Participant, AppState, Action, ConnectionStatus } from './types';
 import ParticipantList from './components/ParticipantList';
@@ -60,10 +61,11 @@ const ThemeToggle: React.FC = () => {
 };
 
 // --- LOBBY COMPONENT ---
-const Lobby: React.FC<{ 
+const Lobby: React.FC<{
     onJoinRoom: (name: string, code: string, avatar: string) => Promise<void>,
-    isJoining: boolean 
-}> = ({ onJoinRoom, isJoining }) => {
+    isJoining: boolean,
+    joinError: string | null
+}> = ({ onJoinRoom, isJoining, joinError }) => {
   const [name, setName] = useState(generateRandomName);
   const [code, setCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATAR_OPTIONS[0]);
@@ -75,8 +77,8 @@ const Lobby: React.FC<{
     }
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => { 
-      e.preventDefault(); 
+  const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
       if (name.trim()) {
           const roomCode = code.trim() || generateRandomRoomCode();
           onJoinRoom(name.trim(), roomCode, selectedAvatar);
@@ -94,6 +96,12 @@ const Lobby: React.FC<{
           <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Choose your Avatar</label>
           <div className="flex justify-center gap-3 flex-wrap">{AVATAR_OPTIONS.map(avatar => (<button key={avatar} onClick={() => setSelectedAvatar(avatar)} className={`p-1 rounded-full transition-all ${selectedAvatar === avatar ? 'ring-2 ring-offset-2 ring-sky-500 dark:ring-offset-slate-800' : ''}`}><img src={avatar} alt="avatar" className="w-12 h-12 rounded-full" /></button>))}</div>
         </div>
+        {joinError && (
+            <div className="bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-600 text-red-700 dark:text-red-300 px-4 py-3 rounded-md animate-slide-in" role="alert">
+                <strong className="font-bold">Connection Failed: </strong>
+                <span className="block sm:inline">{joinError}</span>
+            </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter your name" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
             <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter Room Code (or leave blank)" className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sky-500 text-lg" disabled={isJoining} />
@@ -108,29 +116,101 @@ const Lobby: React.FC<{
 
 // --- TIMER COMPONENT ---
 const Timer: React.FC = () => {
-    const [timeLeft, setTimeLeft] = useState(0);
-    const [isRunning, setIsRunning] = useState(false);
-    const timerRef = useRef<number | null>(null);
+    const { state, dispatch, currentUser } = useCollaborationContext();
+    const { timer } = state;
+    const isFacilitator = currentUser.id === state.facilitatorId;
+    
+    const [displayTime, setDisplayTime] = useState(0);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const soundPlayedRef = useRef(false);
+
+    const playSound = () => {
+        if (!audioContextRef.current) {
+            try {
+                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            } catch (e) {
+                console.error("Web Audio API is not supported in this browser");
+                return;
+            }
+        }
+        const ctx = audioContextRef.current;
+        if (ctx.state === 'suspended') {
+             ctx.resume();
+        }
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(600, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1);
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 1);
+    };
+    
     useEffect(() => {
-        if (isRunning && timeLeft > 0) { timerRef.current = window.setInterval(() => { setTimeLeft(prev => prev - 1); }, 1000); }
-        else if (timeLeft === 0 && isRunning) { setIsRunning(false); }
-        return () => { if (timerRef.current) clearInterval(timerRef.current); };
-    }, [isRunning, timeLeft]);
-    const startTimer = (minutes: number) => { if (timerRef.current) clearInterval(timerRef.current); setTimeLeft(minutes * 60); setIsRunning(true); };
-    const togglePause = () => setIsRunning(prev => !prev);
-    const resetTimer = () => { if (timerRef.current) clearInterval(timerRef.current); setIsRunning(false); setTimeLeft(0); };
-    const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-    const TimeButton: React.FC<{ minutes: number }> = ({ minutes }) => (<button onClick={() => startTimer(minutes)} className="text-xs px-2 py-1 bg-slate-300 dark:bg-slate-600 rounded hover:bg-slate-400 dark:hover:bg-slate-500 transition-colors">{minutes}m</button>);
-    return (<div className="flex items-center gap-2 p-1 rounded-lg bg-slate-200/50 dark:bg-slate-800"><div className="font-mono text-lg font-bold w-20 text-center">{formatTime(timeLeft)}</div><div className="flex items-center gap-2">{!isRunning && timeLeft === 0 ? (<><TimeButton minutes={5} /><TimeButton minutes={10} /><TimeButton minutes={15} /></>) : (<><button onClick={togglePause} className="p-1.5 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700">{isRunning ? <PauseIcon className="w-5 h-5"/> : <PlayIcon className="w-5 h-5"/>}</button><button onClick={resetTimer} className="p-1.5 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700"><ResetIcon className="w-5 h-5" /></button></>)}</div></div>);
+        let interval: number | null = null;
+
+        if (timer.isRunning && timer.startTime) {
+            soundPlayedRef.current = false;
+            const update = () => {
+                const elapsed = (Date.now() - timer.startTime!) / 1000;
+                const remaining = Math.max(0, timer.duration - elapsed);
+                setDisplayTime(remaining);
+
+                if (remaining === 0 && !soundPlayedRef.current) {
+                    playSound();
+                    soundPlayedRef.current = true;
+                    if (isFacilitator) {
+                        dispatch({ type: 'TOGGLE_PAUSE_TIMER' });
+                    }
+                }
+            };
+            update();
+            interval = window.setInterval(update, 1000);
+        } else {
+            setDisplayTime(timer.duration);
+        }
+
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+
+    }, [timer.isRunning, timer.startTime, timer.duration, isFacilitator]);
+
+    const handleStart = (minutes: number) => {
+        if (!isFacilitator) return;
+        dispatch({ type: 'START_TIMER', payload: { duration: minutes * 60 } });
+    };
+    
+    const handleTogglePause = () => {
+        if (!isFacilitator) return;
+        dispatch({ type: 'TOGGLE_PAUSE_TIMER' });
+    };
+    
+    const handleReset = () => {
+        if (!isFacilitator) return;
+        dispatch({ type: 'RESET_TIMER' });
+    };
+
+    const formatTime = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const TimeButton: React.FC<{ minutes: number }> = ({ minutes }) => (<button onClick={() => handleStart(minutes)} disabled={!isFacilitator} className="text-xs px-2 py-1 bg-slate-300 dark:bg-slate-600 rounded hover:bg-slate-400 dark:hover:bg-slate-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{minutes}m</button>);
+
+    const hasStarted = timer.duration > 0;
+
+    return (<div className="flex items-center gap-2 p-1 rounded-lg bg-slate-200/50 dark:bg-slate-800"><div className="font-mono text-lg font-bold w-20 text-center">{formatTime(displayTime)}</div><div className="flex items-center gap-2">{!hasStarted ? (<><TimeButton minutes={5} /><TimeButton minutes={10} /><TimeButton minutes={15} /></>) : (<><button onClick={handleTogglePause} disabled={!isFacilitator} className="p-1.5 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed">{timer.isRunning ? <PauseIcon className="w-5 h-5"/> : <PlayIcon className="w-5 h-5"/>}</button><button onClick={handleReset} disabled={!isFacilitator} className="p-1.5 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"><ResetIcon className="w-5 h-5" /></button></>)}</div></div>);
 }
 
 // --- PROVIDER & MAIN ROOM COMPONENT ---
-const CollaborationProvider: React.FC<{ 
-    children: React.ReactNode; 
-    roomCode: string; 
-    currentUser: Participant; 
+const CollaborationProvider: React.FC<{
+    children: React.ReactNode;
+    roomCode: string;
+    currentUser: Participant;
     facilitatorId: string;
-}> = ({ children, roomCode, currentUser, facilitatorId }) => {
+    peer: any; // Pass the initialized peer object
+    initialConnection: any | null; // The already-established connection for participants
+}> = ({ children, roomCode, currentUser, facilitatorId, peer, initialConnection }) => {
     const [state, localDispatch] = useReducer(appReducer, {
         ...initialState,
         roomCode,
@@ -150,36 +230,36 @@ const CollaborationProvider: React.FC<{
 
     const dispatch = useCallback((action: Action) => {
         if (isFacilitator) {
+            // Facilitator is the source of truth, update locally and broadcast
             localDispatch(action);
-            broadcastRef.current(action);
+            if (action.type !== 'SET_STATE') { // Avoid broadcast loops from state sync
+                broadcastRef.current(action);
+            }
         } else {
-            // Participants send their actions to the facilitator to be processed.
+            // Participant sends action to facilitator and waits for the state update via broadcast
             sendRef.current(facilitatorId, action);
         }
     }, [isFacilitator, facilitatorId]);
+
 
     const onMessage = useCallback((senderId: string, message: any) => {
         if (isFacilitator) {
             if (message.type === 'INTRODUCE_AND_REQUEST_STATE') {
                 console.log(`New participant ${senderId} joined. Sending state and introducing.`);
                 const participant = message.payload as Participant;
-                
-                // Send current state back to the new joiner for immediate sync
-                sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
-
-                // Dispatch the action to add the participant. This will be broadcast to everyone.
+                sendRef.current(senderId, { type: 'SET_STATE', payload: { ...stateRef.current, participants: [...stateRef.current.participants, participant] }});
                 dispatch({ type: 'ADD_PARTICIPANT', payload: participant });
-
             } else if (message.type === 'REQUEST_STATE') {
                 console.log(`Received state request from ${senderId}. Sending current state back.`);
                 sendRef.current(senderId, { type: 'SET_STATE', payload: stateRef.current });
             } else {
-                // An action from a participant. Let the facilitator process it.
-                // The `dispatch` call will handle local state update + broadcast.
-                dispatch(message as Action);
+                // Process action from a participant
+                localDispatch(message as Action);
+                // Broadcast the result of the action to all clients
+                broadcastRef.current(message as Action);
             }
         } else {
-            // Participant receives either a full state dump or an incremental action
+            // Participant receives an action from the facilitator
             if (message.type === 'SET_STATE') {
                 localDispatch({ type: 'SET_STATE', payload: message.payload as AppState });
             } else {
@@ -187,7 +267,7 @@ const CollaborationProvider: React.FC<{
             }
         }
     }, [isFacilitator, dispatch]);
-    
+
     const onOpen = useCallback((peerId: string) => {
         console.log(`Connection opened with ${peerId}.`);
         if (!isFacilitator && peerId === facilitatorId) {
@@ -202,25 +282,18 @@ const CollaborationProvider: React.FC<{
         }
     }, [isFacilitator, dispatch]);
 
-    const { connect, broadcast, send, isReady, connectionStatus, reconnect } = useCollaboration({ 
-        myId: currentUser.id, 
+    const { connect, broadcast, send, isReady, connectionStatus, reconnect } = useCollaboration({
+        peer,
         isFacilitator,
         facilitatorId,
-        onMessage, 
-        onOpen, 
-        onPeerDisconnect 
+        onMessage,
+        onOpen,
+        onPeerDisconnect,
+        initialConnection
     });
-    
+
     broadcastRef.current = broadcast;
     sendRef.current = send;
-
-    useEffect(() => {
-        if (!isFacilitator && isReady) {
-            connect(facilitatorId).catch(error => {
-                console.error("Connection failed unexpectedly after pre-check. The facilitator may have left.", error);
-            });
-        }
-    }, [isFacilitator, isReady, facilitatorId, connect]);
 
     const refreshData = useCallback(async () => {
         if (isFacilitator) {
@@ -262,14 +335,14 @@ const ConnectionStatusIndicator: React.FC = () => {
 
 const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
   const { state, dispatch, currentUser, refreshData, connectionStatus, reconnect } = useCollaborationContext();
-  const { roomCode, mode, isVotingActive, icebreaker, facilitatorId } = state;
+  const { roomCode, mode, isVotingActive, icebreaker, facilitatorId, areVotesRevealed, showIndividualVotes } = state;
   const [copyStatus, setCopyStatus] = useState('Copy Link');
   const [refreshStatus, setRefreshStatus] = useState('Refresh');
   const roomUrl = `${window.location.origin}${window.location.pathname}#${roomCode}`;
   const isFacilitator = currentUser.id === facilitatorId;
 
   useEffect(() => { document.body.classList.toggle('voting-active-bg', isVotingActive && mode === 'planning'); return () => { document.body.classList.remove('voting-active-bg'); } }, [isVotingActive, mode]);
-  
+
   const handleCopyLink = () => {
     navigator.clipboard.writeText(roomUrl).then(() => { setCopyStatus('Copied!'); setTimeout(() => setCopyStatus('Copy Link'), 2000); });
   };
@@ -297,7 +370,7 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
     const newIcebreaker = questionsPool[Math.floor(Math.random() * questionsPool.length)];
     dispatch({ type: 'SET_ICEBREAKER', payload: newIcebreaker });
   };
-  
+
   const handleSetMode = (targetMode: RoomMode) => dispatch({ type: 'SET_MODE', payload: targetMode });
   const ModeButton: React.FC<{ targetMode: RoomMode; children: React.ReactNode }> = ({ targetMode, children }) => (<button onClick={() => handleSetMode(targetMode)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${mode === targetMode ? 'bg-sky-600 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}`}>{children}</button>);
 
@@ -305,15 +378,18 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
     <div className="min-h-screen flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
       <header className="mb-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold text-sky-600 dark:text-sky-400">Scrum Room</h1>
-                <div className="flex items-center gap-4 mt-1">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Room Code: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{roomCode}</span></p>
-                    <button onClick={handleCopyLink} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline"><ClipboardIcon className="w-4 h-4" /> {copyStatus}</button>
-                    <button onClick={handleRefresh} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline" disabled={refreshStatus !== 'Refresh' && connectionStatus !== 'disconnected'}>
-                        <RefreshIcon className="w-4 h-4" /> {connectionStatus === 'disconnected' ? 'Reconnect' : refreshStatus}
-                    </button>
-                    {!isFacilitator && <ConnectionStatusIndicator />}
+            <div className="flex items-center gap-4">
+                 <img src={currentUser.avatar} alt={currentUser.name} className="w-12 h-12 rounded-full ring-2 ring-offset-2 dark:ring-offset-slate-900 ring-sky-500" />
+                 <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-slate-200">{currentUser.name}</h1>
+                    <div className="flex items-center gap-4 mt-1">
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Room: <span className="font-mono bg-slate-200 dark:bg-slate-700 px-3 py-1.5 rounded-md text-base font-semibold">{roomCode}</span></p>
+                        <button onClick={handleCopyLink} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline"><ClipboardIcon className="w-4 h-4" /> {copyStatus}</button>
+                        <button onClick={handleRefresh} className="flex items-center gap-1 text-sm text-sky-600 dark:text-sky-400 hover:underline" disabled={refreshStatus !== 'Refresh' && connectionStatus !== 'disconnected'}>
+                            <RefreshIcon className="w-4 h-4" /> {connectionStatus === 'disconnected' ? 'Reconnect' : refreshStatus}
+                        </button>
+                        {!isFacilitator && <ConnectionStatusIndicator />}
+                    </div>
                 </div>
             </div>
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -323,12 +399,29 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
             </div>
         </div>
         {icebreaker && (
-          <div className="mt-4 flex items-center justify-center gap-2 bg-sky-100/50 dark:bg-sky-900/20 p-3 rounded-lg">
-            <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Icebreaker: <span className="font-normal">{icebreaker}</span></p>
-            {isFacilitator && (
-              <button onClick={handleNewIcebreaker} title="New icebreaker" className="p-1 rounded-full hover:bg-slate-300/50 dark:hover:bg-slate-600/50 transition-colors">
-                <RefreshIcon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-              </button>
+          <div className="mt-4 flex items-center justify-between gap-4 bg-sky-100/50 dark:bg-sky-900/20 p-3 rounded-lg">
+            <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Icebreaker: <span className="font-normal">{icebreaker}</span></p>
+                {isFacilitator && (
+                  <button onClick={handleNewIcebreaker} title="New icebreaker" className="p-1 rounded-full hover:bg-slate-300/50 dark:hover:bg-slate-600/50 transition-colors">
+                    <RefreshIcon className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                  </button>
+                )}
+            </div>
+            
+            {isFacilitator && areVotesRevealed && mode === 'planning' && (
+              <div className="flex items-center gap-2 animate-slide-in">
+                <label htmlFor="show-votes-toggle" className="text-sm font-semibold text-slate-600 dark:text-slate-300 cursor-pointer">
+                  Show individual votes
+                </label>
+                <input
+                  type="checkbox"
+                  id="show-votes-toggle"
+                  checked={showIndividualVotes}
+                  onChange={() => dispatch({ type: 'TOGGLE_SHOW_INDIVIDUAL_VOTES' })}
+                  className="w-4 h-4 rounded text-sky-600 bg-slate-200 border-slate-300 focus:ring-sky-500 dark:bg-slate-700 dark:border-slate-600 dark:focus:ring-sky-600 dark:ring-offset-slate-900 cursor-pointer"
+                />
+              </div>
             )}
           </div>
         )}
@@ -343,73 +436,152 @@ const Room: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
 
 // --- ROOT APP COMPONENT ---
 export default function App() {
-  const [roomInfo, setRoomInfo] = useState<{ code: string; participant: Participant; facilitatorId: string } | null>(null);
+  const [roomInfo, setRoomInfo] = useState<{ code: string; participant: Participant; facilitatorId: string; peer: any; initialConnection: any | null } | null>(null);
   const [isJoining, setIsJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const joinRoom = useCallback(async (name: string, code: string, avatar: string) => {
     setIsJoining(true);
-    const facilitatorPeerId = `scrum-facilitator-peer-${code}`;
+    setJoinError(null);
 
+    const facilitatorPeerId = `scrum-facilitator-peer-${code}`;
+    
     const setHash = () => {
-        const newHash = `${code}`;
-        if (window.location.hash !== `#${newHash}`) {
-            window.location.hash = newHash;
-        }
+        if (window.location.hash !== `#${code}`) window.location.hash = code;
     };
 
-    const participantPeerId = `scrum-participant-${Math.random().toString(36).substr(2, 9)}`;
-    let tempPeer: any = null;
-
-    try {
-        // @ts-ignore - PeerJS is loaded from a script tag
-        tempPeer = new Peer(participantPeerId);
-
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 7000);
-            tempPeer.on('open', () => { clearTimeout(timeout); resolve(); });
-            tempPeer.on('error', (err: Error) => { clearTimeout(timeout); reject(err); });
-        });
-
-        const conn = tempPeer.connect(facilitatorPeerId, { reliable: true });
-        if (!conn) throw new Error("Failed to create connection object.");
-
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error("Facilitator connection timed out.")), 7000);
-            conn.on('open', () => {
-                conn.close();
-                clearTimeout(timeout);
-                resolve();
+    const initializePeer = (id: string): Promise<any> => {
+        return new Promise((resolve, reject) => {
+            // @ts-ignore PeerJS is loaded from a script tag
+            const newPeer = new Peer(id, {
+                // To enable connections between different networks,
+                // we add multiple STUN and TURN servers for redundancy.
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        {
+                            urls: 'turn:openrelay.metered.ca:443',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        {
+                            urls: 'turn:openrelay.metered.ca:80',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        // Adding a redundant TURN server for better reliability
+                        {
+                            urls: "turn:numb.viagenie.ca:3478",
+                            username: "webrtc@live.com",
+                            credential: "muazkh"
+                        }
+                    ]
+                }
             });
-            conn.on('error', (err: Error) => { clearTimeout(timeout); reject(err); });
+            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 10000);
+            newPeer.on('open', () => { clearTimeout(timeout); resolve(newPeer); });
+            newPeer.on('error', (err: any) => { 
+                clearTimeout(timeout); 
+                reject(err); 
+            });
         });
-        
-        console.log("Facilitator found. Joining as participant.");
-        const participant: Participant = { id: participantPeerId, name, avatar };
-        setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId });
-
-    } catch (error) {
-        console.warn("Could not connect to facilitator, creating room instead.", error);
+    };
+    
+    // Optimistic Facilitator Creation
+    try {
+        console.log(`Attempting to become facilitator for room ${code} with ID ${facilitatorPeerId}`);
+        const facilitatorPeer = await initializePeer(facilitatorPeerId);
+        console.log("Successfully became facilitator.");
         const participant: Participant = { id: facilitatorPeerId, name, avatar };
-        setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId });
-    } finally {
-        if (tempPeer) tempPeer.destroy();
+        setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId, peer: facilitatorPeer, initialConnection: null });
         setHash();
         setIsJoining(false);
+
+    } catch (error: any) {
+        // This is the expected path for a participant joining an existing room.
+        if (error.type === 'unavailable-id') {
+            console.log("Facilitator already exists. Joining as participant.");
+            
+            const MAX_RETRIES = 3;
+            const RETRY_DELAY = 2000; // 2 seconds
+            let lastError: any = null;
+
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                let participantPeer: any = null;
+                try {
+                    console.log(`Attempt ${attempt} to join room ${code}...`);
+                    const participantPeerId = `scrum-participant-${Math.random().toString(36).substr(2, 9)}`;
+                    participantPeer = await initializePeer(participantPeerId);
+
+                    console.log(`Connecting to facilitator ${facilitatorPeerId}`);
+                    const conn = await new Promise<any>((resolve, reject) => {
+                        const connection = participantPeer.connect(facilitatorPeerId, { reliable: true });
+                        if (!connection) return reject(new Error("Failed to create connection object."));
+                        
+                        // Increased timeout to allow more time for NAT traversal and relay connection
+                        const timeout = setTimeout(() => reject(new Error("Connection to facilitator timed out.")), 20000);
+                        
+                        connection.on('open', () => { 
+                            clearTimeout(timeout); 
+                            resolve(connection); 
+                        });
+                        connection.on('error', (err: any) => { 
+                            clearTimeout(timeout); 
+                            reject(err); 
+                        });
+                    });
+
+                    console.log("Successfully connected to facilitator.");
+                    const participant: Participant = { id: participantPeerId, name, avatar };
+                    setRoomInfo({ code, participant, facilitatorId: facilitatorPeerId, peer: participantPeer, initialConnection: conn });
+                    setHash();
+                    setIsJoining(false);
+                    return; // Exit the joinRoom function on success
+
+                } catch (participantError: any) {
+                    console.error(`Attempt ${attempt} failed:`, participantError);
+                    lastError = participantError;
+                    if (participantPeer && !participantPeer.destroyed) participantPeer.destroy();
+                    
+                    if (attempt < MAX_RETRIES) {
+                        console.log(`Waiting ${RETRY_DELAY}ms before next attempt...`);
+                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                    }
+                }
+            }
+            
+            // If loop completes without success
+            console.error("All connection attempts failed.", lastError);
+            setJoinError("Could not connect to the room. This can happen on restrictive networks or due to temporary issues with the public relay servers. Please try again.");
+            setIsJoining(false);
+
+        } else {
+            // This is an unexpected error during facilitator creation (e.g., network issue)
+            console.error("An unexpected error occurred trying to become facilitator:", error);
+            setJoinError("Could not create or join the room. Please check your network and try again.");
+            setIsJoining(false);
+        }
     }
   }, []);
 
-  const leaveRoom = useCallback(() => { 
-      setRoomInfo(null); 
-      window.location.hash = ''; 
-  }, []);
-  
-  if (!roomInfo) return <Lobby onJoinRoom={joinRoom} isJoining={isJoining} />;
-  
+  const leaveRoom = useCallback(() => {
+      if (roomInfo?.peer && !roomInfo.peer.destroyed) {
+          roomInfo.peer.destroy();
+      }
+      setRoomInfo(null);
+      window.location.hash = '';
+  }, [roomInfo]);
+
+  if (!roomInfo) return <Lobby onJoinRoom={joinRoom} isJoining={isJoining} joinError={joinError} />;
+
   return (
-    <CollaborationProvider 
-        roomCode={roomInfo.code} 
-        currentUser={roomInfo.participant} 
+    <CollaborationProvider
+        roomCode={roomInfo.code}
+        currentUser={roomInfo.participant}
         facilitatorId={roomInfo.facilitatorId}
+        peer={roomInfo.peer}
+        initialConnection={roomInfo.initialConnection}
     >
         <Room onLeave={leaveRoom} />
     </CollaborationProvider>

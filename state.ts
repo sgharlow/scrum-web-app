@@ -8,11 +8,17 @@ export const initialState: Omit<AppState, 'roomCode' | 'facilitatorId' | 'partic
   votes: {},
   areVotesRevealed: false,
   isVotingActive: false,
+  showIndividualVotes: false,
   retroColumns: [
     { id: 'well', title: 'What went well?', cards: [] },
     { id: 'improve', title: 'What could be improved?', cards: [] },
     { id: 'actions', title: 'Action Items', cards: [] },
   ],
+  timer: {
+    startTime: null,
+    duration: 0,
+    isRunning: false,
+  },
 };
 
 export const appReducer = (state: AppState, action: Action): AppState => {
@@ -20,7 +26,7 @@ export const appReducer = (state: AppState, action: Action): AppState => {
     case 'SET_STATE':
       return action.payload;
     case 'SET_MODE':
-      return { ...state, mode: action.payload, isVotingActive: false };
+      return { ...state, mode: action.payload, isVotingActive: false, showIndividualVotes: false };
     case 'ADD_PARTICIPANT':
         if (state.participants.some(p => p.id === action.payload.id)) {
             return state; // Already exists
@@ -39,7 +45,7 @@ export const appReducer = (state: AppState, action: Action): AppState => {
             : state.currentStoryId;
         return { ...state, stories: newStories, currentStoryId: newCurrentStoryId };
     case 'SET_CURRENT_STORY':
-      return { ...state, currentStoryId: action.payload, votes: {}, areVotesRevealed: false, isVotingActive: false };
+      return { ...state, currentStoryId: action.payload, votes: {}, areVotesRevealed: false, isVotingActive: false, showIndividualVotes: false };
     case 'CAST_VOTE':
       return { ...state, votes: { ...state.votes, [action.payload.participantId]: action.payload.value } };
     case 'SET_VOTES':
@@ -47,12 +53,19 @@ export const appReducer = (state: AppState, action: Action): AppState => {
     case 'REVEAL_VOTES':
       return { ...state, areVotesRevealed: true };
     case 'RESET_VOTING':
-      return { ...state, areVotesRevealed: false, votes: {}, isVotingActive: false };
+      return { ...state, areVotesRevealed: false, votes: {}, isVotingActive: false, showIndividualVotes: false };
     case 'START_VOTING':
-        return { ...state, isVotingActive: true, areVotesRevealed: false, votes: {} };
+        return { ...state, isVotingActive: true, areVotesRevealed: false, votes: {}, showIndividualVotes: false };
+    case 'TOGGLE_SHOW_INDIVIDUAL_VOTES':
+      return { ...state, showIndividualVotes: !state.showIndividualVotes };
     case 'SET_ESTIMATE':
       return {...state, stories: state.stories.map(s => s.id === action.payload.storyId ? {...s, estimate: action.payload.estimate} : s)};
     case 'ADD_RETRO_CARD':
+      // Ensure we don't add a duplicate card ID
+      const column = state.retroColumns.find(c => c.id === action.payload.columnId);
+      if (column && column.cards.some(c => c.id === action.payload.card.id)) {
+        return state;
+      }
       return {
         ...state,
         retroColumns: state.retroColumns.map(col =>
@@ -112,6 +125,22 @@ export const appReducer = (state: AppState, action: Action): AppState => {
       return { ...state, icebreaker: action.payload };
     case 'SET_FACILITATOR':
       return { ...state, facilitatorId: action.payload };
+    
+    // --- TIMER ACTIONS ---
+    case 'START_TIMER':
+      return { ...state, timer: { isRunning: true, duration: action.payload.duration, startTime: Date.now() }};
+    case 'TOGGLE_PAUSE_TIMER': {
+      if (state.timer.isRunning) {
+        const elapsed = (Date.now() - state.timer.startTime!) / 1000;
+        const remaining = Math.max(0, state.timer.duration - elapsed);
+        return { ...state, timer: { ...state.timer, isRunning: false, startTime: null, duration: remaining }};
+      } else {
+        return { ...state, timer: { ...state.timer, isRunning: true, startTime: Date.now() }};
+      }
+    }
+    case 'RESET_TIMER':
+      return { ...state, timer: { isRunning: false, startTime: null, duration: 0 }};
+
     default:
       return state;
   }

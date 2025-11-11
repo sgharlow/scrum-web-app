@@ -47,8 +47,14 @@ export interface AppState {
   votes: Record<string, VoteValue>;
   areVotesRevealed: boolean;
   isVotingActive: boolean;
+  showIndividualVotes: boolean;
   retroColumns: RetroColumn[];
   icebreaker: string;
+  timer: {
+    startTime: number | null; // Timestamp when started/resumed
+    duration: number; // The current countdown duration (in seconds)
+    isRunning: boolean;
+  };
 }
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
@@ -67,6 +73,7 @@ export type Action =
   | { type: 'REVEAL_VOTES' }
   | { type: 'RESET_VOTING' }
   | { type: 'START_VOTING' }
+  | { type: 'TOGGLE_SHOW_INDIVIDUAL_VOTES' }
   | { type: 'SET_ESTIMATE'; payload: { storyId: string; estimate: VoteValue } }
   | { type: 'ADD_RETRO_CARD'; payload: { columnId: RetroColumnId; card: RetroCard } }
   | { type: 'VOTE_RETRO_CARD'; payload: { columnId: RetroColumnId; cardId: string } }
@@ -74,4 +81,7 @@ export type Action =
   | { type: 'SORT_RETRO_COLUMN'; payload: RetroColumnId }
   | { type: 'MOVE_RETRO_CARD'; payload: { sourceColumnId: RetroColumnId; destColumnId: RetroColumnId; cardId: string, insertAtIndex: number } }
   | { type: 'SET_ICEBREAKER'; payload: string }
-  | { type: 'SET_FACILITATOR'; payload: string };
+  | { type: 'SET_FACILITATOR'; payload: string }
+  | { type: 'START_TIMER'; payload: { duration: number } }
+  | { type: 'TOGGLE_PAUSE_TIMER' }
+  | { type: 'RESET_TIMER' };

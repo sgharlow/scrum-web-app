@@ -50,8 +50,18 @@ export default function VotingArea() {
         
         const numericVotes = Object.values(votes).filter((v): v is number => typeof v === 'number');
         if (numericVotes.length > 0) {
-            const median = numericVotes.sort((a,b) => a-b)[Math.floor(numericVotes.length / 2)];
-            dispatch({ type: 'SET_ESTIMATE', payload: { storyId: currentStoryId, estimate: median } });
+            const sortedVotes = [...numericVotes].sort((a,b) => a-b);
+            const mid = Math.floor(sortedVotes.length / 2);
+            const median = sortedVotes.length % 2 !== 0 ? sortedVotes[mid] : (sortedVotes[mid - 1] + sortedVotes[mid]) / 2;
+
+            // Find the closest value in our voting scale to the calculated median
+            const scaleNumbers = VOTING_SCALE.filter((v): v is number => typeof v === 'number');
+            if (scaleNumbers.length > 0) {
+                const closestEstimate = scaleNumbers.reduce((prev, curr) => 
+                    (Math.abs(curr - median) < Math.abs(prev - median) ? curr : prev)
+                );
+                dispatch({ type: 'SET_ESTIMATE', payload: { storyId: currentStoryId, estimate: closestEstimate } });
+            }
         }
     };
     

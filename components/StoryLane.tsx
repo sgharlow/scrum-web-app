@@ -3,7 +3,7 @@ import type { Story, Participant, VoteValue } from '../types';
 import { VOTING_SCALE } from '../constants';
 import VotingArea from './VotingArea';
 import ResultsDisplay from './ResultsDisplay';
-import { PencilIcon, TrashIcon, PlayIcon as StartVotingIcon } from './Icons';
+import { PencilIcon, TrashIcon, PlayIcon as StartVotingIcon, XMarkIcon } from './Icons';
 import { useCollaborationContext } from '../App';
 
 const StoryList: React.FC<{
@@ -14,6 +14,7 @@ const StoryList: React.FC<{
     const [newStoryTitle, setNewStoryTitle] = useState('');
     const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
     const [editingTitle, setEditingTitle] = useState('');
+    const [editingEstimateId, setEditingEstimateId] = useState<string | null>(null);
     
     const onSelectStory = (id: string) => {
         if (id === currentStoryId) return;
@@ -30,7 +31,7 @@ const StoryList: React.FC<{
     const onUpdateStory = (id: string, title: string) => dispatch({ type: 'UPDATE_STORY', payload: {id, title} });
 
     const handleAddStory = (e: React.FormEvent) => { e.preventDefault(); if(newStoryTitle.trim()) { onAddStory(newStoryTitle.trim()); setNewStoryTitle(''); } };
-    const handleStartEdit = (story: Story) => { setEditingStoryId(story.id); setEditingTitle(story.title); };
+    const handleStartEdit = (story: Story) => { setEditingEstimateId(null); setEditingStoryId(story.id); setEditingTitle(story.title); };
     const handleCancelEdit = () => { setEditingStoryId(null); setEditingTitle(''); };
     const handleSaveEdit = () => { if (editingStoryId && editingTitle.trim()) { onUpdateStory(editingStoryId, editingTitle.trim()); } handleCancelEdit(); };
     const handleExport = () => {
@@ -55,7 +56,47 @@ const StoryList: React.FC<{
                         {editingStoryId === story.id && isFacilitator ? (
                             <div className="flex gap-2"><input type="text" value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} onBlur={handleSaveEdit} onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); if (e.key === 'Escape') handleCancelEdit(); }} autoFocus className="flex-grow bg-white dark:bg-slate-900 border border-sky-500 rounded-md px-2 py-1 focus:outline-none" /></div>
                         ) : (
-                            <div className="flex justify-between items-center"><span className="font-medium text-slate-800 dark:text-slate-200 break-all">{story.title}</span><div className="flex items-center gap-2">{isFacilitator && (<div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2"><button onClick={(e) => { e.stopPropagation(); handleStartEdit(story); }} className="text-slate-500 hover:text-sky-600"><PencilIcon className="w-4 h-4"/></button><button onClick={(e) => { e.stopPropagation(); onDeleteStory(story.id); }} className="text-slate-500 hover:text-red-600"><TrashIcon className="w-4 h-4"/></button></div>)}{story.estimate && (<span className="text-sm font-bold bg-sky-500 text-white rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0 ml-2">{story.estimate}</span>)}</div></div>
+                            <div className="flex justify-between items-center">
+                                <span className="font-medium text-slate-800 dark:text-slate-200 break-all">{story.title}</span>
+                                <div className="flex items-center gap-2">
+                                    {isFacilitator && (<div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2"><button onClick={(e) => { e.stopPropagation(); handleStartEdit(story); }} className="text-slate-500 hover:text-sky-600"><PencilIcon className="w-4 h-4"/></button><button onClick={(e) => { e.stopPropagation(); onDeleteStory(story.id); }} className="text-slate-500 hover:text-red-600"><TrashIcon className="w-4 h-4"/></button></div>)}
+                                    {story.estimate != null && (
+                                        isFacilitator && editingEstimateId === story.id ? (
+                                            <div className="flex gap-1 items-center bg-slate-200 dark:bg-slate-600 p-1 rounded-full animate-slide-in">
+                                                {VOTING_SCALE.map(value => (
+                                                    <button
+                                                        key={String(value)}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            dispatch({ type: 'SET_ESTIMATE', payload: { storyId: story.id, estimate: value } });
+                                                            setEditingEstimateId(null);
+                                                        }}
+                                                        className="w-6 h-6 flex items-center justify-center text-xs font-bold bg-white dark:bg-slate-800 rounded-full hover:bg-sky-200 dark:hover:bg-sky-700"
+                                                    >
+                                                        {value === '☕' ? '☕' : value === '❓' ? '?' : value}
+                                                    </button>
+                                                ))}
+                                                 <button onClick={(e) => { e.stopPropagation(); setEditingEstimateId(null); }} className="p-1 text-slate-500 hover:text-red-500" aria-label="Cancel edit"><XMarkIcon className="w-4 h-4" /></button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={(e) => {
+                                                    if (isFacilitator) {
+                                                        e.stopPropagation();
+                                                        if(editingStoryId) handleSaveEdit();
+                                                        setEditingEstimateId(story.id);
+                                                    }
+                                                }}
+                                                className={`text-sm font-bold bg-sky-500 text-white rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0 ml-2 ${isFacilitator ? 'cursor-pointer hover:bg-sky-600' : ''}`}
+                                                title={isFacilitator ? "Edit Estimate" : `Estimate: ${story.estimate}`}
+                                                aria-label={isFacilitator ? "Edit Estimate" : `Estimate: ${story.estimate}`}
+                                            >
+                                                {story.estimate}
+                                            </button>
+                                        )
+                                    )}
+                                </div>
+                            </div>
                         )}
                     </div>
                 ))}

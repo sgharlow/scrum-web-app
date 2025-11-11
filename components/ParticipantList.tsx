@@ -28,7 +28,7 @@ const ParticipantCard: React.FC<ParticipantCardProps> = ({ participant, isFacili
             {isViewerFacilitator && !isFacilitator && (
               <button 
                   onClick={() => onPromote(participant.id)} 
-                  className="p-1 text-slate-400 hover:text-yellow-500 transition-colors opacity-0 group-hover:opacity-100"
+                  className="p-1 text-slate-400 hover:text-yellow-500 transition-colors"
                   title={`Make ${participant.name} Facilitator`}
                   aria-label={`Make ${participant.name} Facilitator`}
               >
@@ -66,7 +66,7 @@ const ParticipantCard: React.FC<ParticipantCardProps> = ({ participant, isFacili
 
 export default function ParticipantList() {
     const { state, dispatch, currentUser } = useCollaborationContext();
-    const { participants, votes, areVotesRevealed, facilitatorId } = state;
+    const { participants, votes, areVotesRevealed, facilitatorId, showIndividualVotes } = state;
     const isCurrentUserFacilitator = currentUser.id === facilitatorId;
 
     const handlePromote = (participantId: string) => {
@@ -89,7 +89,7 @@ export default function ParticipantList() {
                         voteValue={votes[p.id]}
                         isFacilitator={p.id === facilitatorId}
                         hasVoted={!!votes[p.id]}
-                        areVotesRevealed={areVotesRevealed}
+                        areVotesRevealed={areVotesRevealed && showIndividualVotes}
                         isViewerFacilitator={isCurrentUserFacilitator}
                         onPromote={handlePromote}
                     />
