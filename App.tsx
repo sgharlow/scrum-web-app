@@ -523,13 +523,15 @@ export default function App() {
                 return;
             }
 
-            const MAX_RETRIES = 3;
-            const RETRY_DELAY = 1000; // 1 second between retries
+            const MAX_RETRIES = 2; // Reduced since first attempt now has more time
             let lastError: any = null;
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
                     console.log(`Attempt ${attempt} to connect to facilitator ${facilitatorPeerId}...`);
+
+                    // Progressive timeout - first attempt gets more time for ICE negotiation
+                    const timeoutDuration = attempt === 1 ? 25000 : 12000;
 
                     const conn = await new Promise<any>((resolve, reject) => {
                         const connection = participantPeer.connect(facilitatorPeerId, {
@@ -538,11 +540,22 @@ export default function App() {
                         });
                         if (!connection) return reject(new Error("Failed to create connection object."));
 
-                        // Longer timeout to allow WebRTC to establish connection through NAT/TURN
-                        const timeout = setTimeout(() => reject(new Error("Connection to facilitator timed out.")), 15000);
+                        // Monitor ICE connection state for debugging
+                        const peerConnection = (connection as any).peerConnection;
+                        if (peerConnection) {
+                            peerConnection.oniceconnectionstatechange = () => {
+                                console.log(`ICE connection state: ${peerConnection.iceConnectionState}`);
+                            };
+                        }
+
+                        const timeout = setTimeout(() => {
+                            console.warn(`Attempt ${attempt} timed out after ${timeoutDuration}ms`);
+                            reject(new Error("Connection to facilitator timed out."));
+                        }, timeoutDuration);
 
                         connection.on('open', () => {
                             clearTimeout(timeout);
+                            console.log(`Connection opened on attempt ${attempt}`);
                             resolve(connection);
                         });
                         connection.on('error', (err: any) => {
@@ -563,8 +576,9 @@ export default function App() {
                     lastError = participantError;
 
                     if (attempt < MAX_RETRIES) {
-                        console.log(`Waiting ${RETRY_DELAY}ms before retry ${attempt + 1}...`);
-                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                        const retryDelay = 500; // Short delay since peer is already initialized
+                        console.log(`Waiting ${retryDelay}ms before retry ${attempt + 1}...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
                     }
                 }
             }
