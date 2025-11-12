@@ -458,8 +458,13 @@ export default function App() {
                 // we add multiple STUN and TURN servers for redundancy.
                 config: {
                     'iceServers': [
+                        // Multiple STUN servers for redundancy
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun.cloudflare.com:3478' },
+
+                        // UDP TURN servers
                         {
                             urls: 'turn:openrelay.metered.ca:443',
                             username: 'openrelayproject',
@@ -470,18 +475,38 @@ export default function App() {
                             username: 'openrelayproject',
                             credential: 'openrelayproject'
                         },
-                        // Adding a redundant TURN server for better reliability
+
+                        // TCP TURN servers (critical for restrictive networks that block UDP)
+                        {
+                            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        {
+                            urls: 'turn:openrelay.metered.ca:80?transport=tcp',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+
+                        // Additional TURN provider for redundancy
                         {
                             urls: "turn:numb.viagenie.ca:3478",
                             username: "webrtc@live.com",
                             credential: "muazkh"
+                        },
+
+                        // Freeturn.net as backup
+                        {
+                            urls: ['turn:freeturn.net:3478', 'turn:freeturn.net:5349'],
+                            username: 'free',
+                            credential: 'free'
                         }
                     ],
                     'iceTransportPolicy': 'all',
                     'iceCandidatePoolSize': 10
                 }
             });
-            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 8000);
+            const timeout = setTimeout(() => reject(new Error("Signaling server connection timed out.")), 10000);
             newPeer.on('open', () => { clearTimeout(timeout); resolve(newPeer); });
             newPeer.on('error', (err: any) => {
                 clearTimeout(timeout);
@@ -523,15 +548,16 @@ export default function App() {
                 return;
             }
 
-            const MAX_RETRIES = 2; // Reduced since first attempt now has more time
+            const MAX_RETRIES = 3; // Increased for better success rate
             let lastError: any = null;
+            const connectionStats = { host: 0, srflx: 0, relay: 0 }; // Track ICE candidate types
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
-                    console.log(`Attempt ${attempt} to connect to facilitator ${facilitatorPeerId}...`);
+                    console.log(`%c[Attempt ${attempt}/${MAX_RETRIES}] Connecting to facilitator ${facilitatorPeerId}...`, 'color: #0ea5e9; font-weight: bold');
 
-                    // Progressive timeout - first attempt gets more time for ICE negotiation
-                    const timeoutDuration = attempt === 1 ? 25000 : 12000;
+                    // Progressive timeout strategy: more time for initial attempts
+                    const timeoutDuration = attempt === 1 ? 35000 : attempt === 2 ? 20000 : 15000;
 
                     const conn = await new Promise<any>((resolve, reject) => {
                         const connection = participantPeer.connect(facilitatorPeerId, {
@@ -540,26 +566,60 @@ export default function App() {
                         });
                         if (!connection) return reject(new Error("Failed to create connection object."));
 
-                        // Monitor ICE connection state for debugging
+                        // Enhanced ICE monitoring for diagnostics
                         const peerConnection = (connection as any).peerConnection;
                         if (peerConnection) {
+                            // Track ICE connection state changes
                             peerConnection.oniceconnectionstatechange = () => {
-                                console.log(`ICE connection state: ${peerConnection.iceConnectionState}`);
+                                const state = peerConnection.iceConnectionState;
+                                console.log(`[Attempt ${attempt}] ICE connection state: ${state}`);
+
+                                // Log if connection failed at ICE level
+                                if (state === 'failed' || state === 'disconnected') {
+                                    console.warn(`[Attempt ${attempt}] ICE connection ${state}`);
+                                }
+                            };
+
+                            // Track ICE gathering state
+                            peerConnection.onicegatheringstatechange = () => {
+                                const state = peerConnection.iceGatheringState;
+                                console.log(`[Attempt ${attempt}] ICE gathering state: ${state}`);
+                            };
+
+                            // Log ICE candidates to understand which connection types are available
+                            peerConnection.onicecandidate = (event: any) => {
+                                if (event.candidate) {
+                                    const type = event.candidate.type; // host, srflx (STUN), or relay (TURN)
+                                    const protocol = event.candidate.protocol; // udp or tcp
+                                    connectionStats[type as keyof typeof connectionStats]++;
+                                    console.log(`[Attempt ${attempt}] ICE candidate: ${type} (${protocol})`);
+                                } else {
+                                    // null candidate means gathering is complete
+                                    console.log(`[Attempt ${attempt}] ICE gathering complete. Stats:`, connectionStats);
+                                }
+                            };
+
+                            // Monitor signaling state
+                            peerConnection.onsignalingstatechange = () => {
+                                console.log(`[Attempt ${attempt}] Signaling state: ${peerConnection.signalingState}`);
                             };
                         }
 
                         const timeout = setTimeout(() => {
-                            console.warn(`Attempt ${attempt} timed out after ${timeoutDuration}ms`);
+                            console.warn(`%c[Attempt ${attempt}] Connection timed out after ${timeoutDuration}ms`, 'color: #f59e0b');
+                            console.log(`[Attempt ${attempt}] Final ICE candidate stats:`, connectionStats);
                             reject(new Error("Connection to facilitator timed out."));
                         }, timeoutDuration);
 
                         connection.on('open', () => {
                             clearTimeout(timeout);
-                            console.log(`Connection opened on attempt ${attempt}`);
+                            console.log(`%c[Attempt ${attempt}] ✓ Connection opened successfully!`, 'color: #10b981; font-weight: bold');
+                            console.log(`[Attempt ${attempt}] Final ICE candidate stats:`, connectionStats);
                             resolve(connection);
                         });
                         connection.on('error', (err: any) => {
                             clearTimeout(timeout);
+                            console.error(`[Attempt ${attempt}] Connection error:`, err);
                             reject(err);
                         });
                     });
@@ -572,12 +632,13 @@ export default function App() {
                     return; // Exit the joinRoom function on success
 
                 } catch (participantError: any) {
-                    console.error(`Attempt ${attempt} failed:`, participantError);
+                    console.error(`%c[Attempt ${attempt}] Failed:`, 'color: #ef4444', participantError);
                     lastError = participantError;
 
                     if (attempt < MAX_RETRIES) {
-                        const retryDelay = 500; // Short delay since peer is already initialized
-                        console.log(`Waiting ${retryDelay}ms before retry ${attempt + 1}...`);
+                        // Progressive retry delay
+                        const retryDelay = attempt === 1 ? 1000 : 500;
+                        console.log(`[Attempt ${attempt}] Waiting ${retryDelay}ms before retry ${attempt + 1}...`);
                         await new Promise(resolve => setTimeout(resolve, retryDelay));
                     }
                 }

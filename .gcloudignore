@@ -1,0 +1,29 @@
+# Node modules - not needed for simple Dockerfile
+node_modules/
+
+# Build artifacts (keep dist/ since we're using pre-built files)
+npm-debug.log
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,6 +1,5 @@
 node_modules
 npm-debug.log
-dist
 .git
 .gitignore
 README.md
@@ -9,3 +8,4 @@ README.md
 .vscode
 .idea
 *.md
+!PHASE2-TURN-INFRASTRUCTURE.md
